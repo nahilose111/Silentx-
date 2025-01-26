@@ -1,0 +1,6 @@
+Config = {
+    namescript = "SilentX Hub",
+    logoscript = "128074321156831",
+    tacgia = "Thuw Day"
+}
+loadstring(game:HttpGet("https://raw.githubusercontent.com/tngaming123/vesion/refs/heads/main/scriptbffree.lua"))()
