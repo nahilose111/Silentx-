@@ -1,383 +1,1052 @@
---Settings--
-local ESP = {
-    Enabled = false,
-    Boxes = false,
-    BoxShift = CFrame.new(0,-1.5,0),
-    BoxSize = Vector3.new(4,6,0),
-    Color = Color3.fromRGB(0,255,0),
-    FaceCamera = false,
-    Names = false,
-    TeamColor = false,
-    Thickness = 2,
-    AttachShift = 1,
-    TeamMates = false,
-    Players = false,
-    
-    Objects = setmetatable({}, {__mode="kv"}),
-    Overrides = {}
+--HYP3R Loader v2.7.1
+--New precation recoil,ESP v3.3,New ESP featrure v2
+--Support GF
+-- code and debug by Zysigk
+local function notif(str,dur)
+	game:FindService("StarterGui"):SetCore("SendNotification", {
+		Title = "Hyper Loader",
+		Text = str,
+		Icon = "rbxassetid://73621690387432",
+		Duration = dur or 9
+	})
+end
+notif("Loading!", 2)
+
+
+--// Kavo UI 
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+local Window = Library.CreateLib("HYP3R | V2.6.9", "Midnight")
+
+
+local function notif(str,dur)
+	game:FindService("StarterGui"):SetCore("SendNotification", {
+		Title = "Hyper Loader",
+		Text = str,
+		Icon = "rbxassetid://73621690387432",
+		Duration = dur or 5
+	})
+end
+notif("Loaded successfully! Created by Zysigk", 3)
+
+
+--// Services
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Drawing = Drawing
+
+--// Hotkey to toggle UI
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Insert then
+        Library:ToggleUI()
+    end
+end)
+
+
+
+-- ================== TAB AIMBOT FULL + NO RECOIL + AIM LINE + TorsoUP + PRECAUTION + Ignore Server Bots ==================
+-- Assumes `Window` (Kavo) already created.
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Drawing = Drawing
+
+local TabAimbot = Window:NewTab("Aimbot")
+local SectionAimbot = TabAimbot:NewSection("Aimbot Settings")
+
+-- Target choices (thêm "TorsoUP")
+local TargetParts = {"Head","UpperTorso","HumanoidRootPart","TorsoUP"}
+local TargetIndex = 1
+
+local Aimbot = {
+    Enabled=false,
+    Locked=nil,
+    FOV=120,
+    Sensitivity=0.2,
+    LockPart=TargetParts[TargetIndex],
+    TeamCheck=false,
+    WallCheck=false,
+    AimCondition="Aiming",
+    ShowFOV=true,
+    FOVColor=Color3.fromRGB(255,255,255),
+    FOVThickness=1,
+    FOVTransparency=0.5,
+    RandomPart=false,
+    HeadshotChance=45,
+    BodyChance=55,
+    SafeAim=false,
+    AimLine=false,
+
+    -- Precaution (kéo camera xuống khi bắn để kiểm đường đạn)
+    PrecautionEnabled = false,         -- bật/tắt tính năng
+    PrecautionMaxAngle = 5,            -- góc tối đa (độ) sẽ kéo xuống
+    PrecautionSpeed = 30,              -- tốc độ tăng góc (độ/giây)
+    PrecautionSmoothness = 0.5         -- hệ số mượt (0.01 .. 1), càng cao = áp dụng rotation nhanh hơn
 }
 
---Declarations--
-local cam = workspace.CurrentCamera
-local plrs = game:GetService("Players")
-local plr = plrs.LocalPlayer
-local mouse = plr:GetMouse()
+-- === MỚI: Ignore Server Bots (NPC in workspace) toggle ===
+-- Mặc định: false (không bỏ qua bot -> aim cả bot)
+local IgnoreServerBots = false
 
-local V3new = Vector3.new
-local WorldToViewportPoint = cam.WorldToViewportPoint
+local NoRecoilEnabled = false
+local OriginalSpreadValues = {}
+local aimingSession = false
+local CurrentSessionPart = nil
+local holdingLeft, holdingRight = false, false
 
---Functions--
-local function Draw(obj, props)
-	local new = Drawing.new(obj)
-	
-	props = props or {}
-	for i,v in pairs(props) do
-		new[i] = v
-	end
-	return new
-end
+local currentPrecAngle = 0 -- góc hiện tại đang áp dụng (độ)
 
-function ESP:GetTeam(p)
-	local ov = self.Overrides.GetTeam
-	if ov then
-		return ov(p)
-	end
-	
-	return p and p.Team
-end
-
-function ESP:IsTeamMate(p)
-    local ov = self.Overrides.IsTeamMate
-	if ov then
-		return ov(p)
+-- Input detection
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then holdingLeft = true end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then holdingRight = true end
+    if input.KeyCode == Enum.KeyCode.End then
+        TargetIndex = TargetIndex + 1
+        if TargetIndex > #TargetParts then TargetIndex = 1 end
+        Aimbot.LockPart = TargetParts[TargetIndex]
+    elseif input.KeyCode == Enum.KeyCode.PageDown then
+        Aimbot.Enabled = not Aimbot.Enabled
+        FOVCircle.Visible = Aimbot.Enabled and Aimbot.ShowFOV
     end
-    
-    return self:GetTeam(p) == self:GetTeam(plr)
-end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then holdingLeft = false end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then holdingRight = false end
+end)
 
-function ESP:GetColor(obj)
-	local ov = self.Overrides.GetColor
-	if ov then
-		return ov(obj)
-    end
-    local p = self:GetPlrFromChar(obj)
-	return p and self.TeamColor and p.Team and p.Team.TeamColor.Color or self.Color
-end
-
-function ESP:GetPlrFromChar(char)
-	local ov = self.Overrides.GetPlrFromChar
-	if ov then
-		return ov(char)
-	end
-	
-	return plrs:GetPlayerFromCharacter(char)
-end
-
-function ESP:Toggle(bool)
-    self.Enabled = bool
-    if not bool then
-        for i,v in pairs(self.Objects) do
-            if v.Type == "Box" then --fov circle etc
-                if v.Temporary then
-                    v:Remove()
-                else
-                    for i,v in pairs(v.Components) do
-                        v.Visible = false
+-- No Recoil funcs
+local function ApplyNoRecoil()
+    local WeaponsFolder = ReplicatedStorage:FindFirstChild("Weapons")
+    if not WeaponsFolder then return end
+    for _, weapon in pairs(WeaponsFolder:GetChildren()) do
+        local SpreadFolder = weapon:FindFirstChild("Spread")
+        if SpreadFolder then
+            for _, val in pairs(SpreadFolder:GetChildren()) do
+                if val:IsA("NumberValue") then
+                    local key = weapon.Name .. "/" .. val.Name
+                    if OriginalSpreadValues[key] == nil then
+                        OriginalSpreadValues[key] = val.Value
                     end
+                    val.Value = 0
                 end
             end
         end
     end
 end
 
-function ESP:GetBox(obj)
-    return self.Objects[obj]
+local function RestoreRecoil()
+    local WeaponsFolder = ReplicatedStorage:FindFirstChild("Weapons")
+    if not WeaponsFolder then return end
+    for _, weapon in pairs(WeaponsFolder:GetChildren()) do
+        local SpreadFolder = weapon:FindFirstChild("Spread")
+        if SpreadFolder then
+            for _, val in pairs(SpreadFolder:GetChildren()) do
+                if val:IsA("NumberValue") then
+                    local key = weapon.Name .. "/" .. val.Name
+                    local original = OriginalSpreadValues[key]
+                    if original then val.Value = original end
+                end
+            end
+        end
+    end
 end
 
-function ESP:AddObjectListener(parent, options)
-    local function NewListener(c)
-        if type(options.Type) == "string" and c:IsA(options.Type) or options.Type == nil then
-            if type(options.Name) == "string" and c.Name == options.Name or options.Name == nil then
-                if not options.Validator or options.Validator(c) then
-                    local box = ESP:Add(c, {
-                        PrimaryPart = type(options.PrimaryPart) == "string" and c:WaitForChild(options.PrimaryPart) or type(options.PrimaryPart) == "function" and options.PrimaryPart(c),
-                        Color = type(options.Color) == "function" and options.Color(c) or options.Color,
-                        ColorDynamic = options.ColorDynamic,
-                        Name = type(options.CustomName) == "function" and options.CustomName(c) or options.CustomName,
-                        IsEnabled = options.IsEnabled,
-                        RenderInNil = options.RenderInNil
-                    })
-                    --TODO: add a better way of passing options
-                    if options.OnAdded then
-                        coroutine.wrap(options.OnAdded)(box)
+-- wallCheck
+local function wallCheck(origin, pos, targetCharacter)
+    if not Aimbot.WallCheck then return true end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local blacklist = {}
+    if LocalPlayer.Character then table.insert(blacklist, LocalPlayer.Character) end
+    if targetCharacter then table.insert(blacklist, targetCharacter) end
+    params.FilterDescendantsInstances = blacklist
+    params.IgnoreWater = true
+    local direction = pos - origin
+    local result = workspace:Raycast(origin, direction, params)
+    return result == nil
+end
+
+local function isEnemy(player)
+    if not player or not player.Character then return false end
+    if Aimbot.TeamCheck and LocalPlayer.Team and player.Team then
+        return player.Team ~= LocalPlayer.Team
+    end
+    return true
+end
+
+-- FOV Circle
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.NumSides = 64
+FOVCircle.Filled = false
+FOVCircle.Thickness = Aimbot.FOVThickness
+FOVCircle.Transparency = Aimbot.FOVTransparency
+FOVCircle.Color = Aimbot.FOVColor
+FOVCircle.Radius = Aimbot.FOV
+FOVCircle.Visible = Aimbot.ShowFOV and Aimbot.Enabled
+
+-- Aim Line
+local AimLine = Drawing.new("Line")
+AimLine.Visible = false
+AimLine.Thickness = 1
+AimLine.Transparency = 1
+AimLine.Color = Color3.fromRGB(255,255,255)
+
+-- UI Controls (giữ nguyên các control cũ)
+SectionAimbot:NewDropdown("Target Part","",TargetParts,function(v)
+    Aimbot.LockPart = v
+    for i,p in ipairs(TargetParts) do if p == v then TargetIndex = i break end end
+end)
+SectionAimbot:NewDropdown("Aim Condition","",{"Fire","Aiming","Always","Both"},function(v)
+    Aimbot.AimCondition = v
+end)
+SectionAimbot:NewToggle("Enable Aimbot","",function(v)
+    Aimbot.Enabled = v
+    FOVCircle.Visible = v and Aimbot.ShowFOV
+end)
+SectionAimbot:NewToggle("Aim Line","",function(v)
+    Aimbot.AimLine = v
+    AimLine.Visible = v
+end)
+
+-- === MỚI: Ignore Server Bots toggle (chỉ thêm) ===
+SectionAimbot:NewToggle("Ignore Server Bots","Bật: bỏ qua NPC/bot trong workspace (model có Humanoid nhưng không phải player).",function(v)
+    IgnoreServerBots = v
+end)
+
+SectionAimbot:NewSlider("FOV","",360,10,function(v)
+    Aimbot.FOV = v
+    FOVCircle.Radius = v
+end)
+SectionAimbot:NewSlider("Sensitivity","",100,1,function(v)
+    Aimbot.Sensitivity = math.clamp(v/100, 0.001, 5)
+end)
+SectionAimbot:NewDropdown("FOV Color","",{"White","Red","Green","Blue","Yellow"},function(v)
+    local colors = {
+        White = Color3.fromRGB(255,255,255),
+        Red = Color3.fromRGB(255,0,0),
+        Green = Color3.fromRGB(0,255,0),
+        Blue = Color3.fromRGB(0,0,255),
+        Yellow = Color3.fromRGB(255,255,0)
+    }
+    Aimbot.FOVColor = colors[v] or Color3.fromRGB(255,255,255)
+    FOVCircle.Color = Aimbot.FOVColor
+end)
+SectionAimbot:NewToggle("Wall Check","",function(v) Aimbot.WallCheck = v end)
+SectionAimbot:NewToggle("Team Check","",function(v) Aimbot.TeamCheck = v end)
+SectionAimbot:NewToggle("Show FOV","",function(v) Aimbot.ShowFOV = v; FOVCircle.Visible = Aimbot.Enabled and v end)
+SectionAimbot:NewSlider("FOV Thickness","",10,1,function(v) Aimbot.FOVThickness = v; FOVCircle.Thickness = v end)
+SectionAimbot:NewSlider("FOV Transparency (%)","",100,1,function(v) Aimbot.FOVTransparency = math.clamp(v/100,0,1); FOVCircle.Transparency = Aimbot.FOVTransparency end)
+SectionAimbot:NewToggle("Random Part","",function(v) Aimbot.RandomPart = v end)
+SectionAimbot:NewSlider("% Headshot","",100,0,function(v) Aimbot.HeadshotChance = math.clamp(v,0,100) end)
+SectionAimbot:NewSlider("% Body","",100,0,function(v) Aimbot.BodyChance = math.clamp(v,0,100) end)
+SectionAimbot:NewToggle("Safe Aim","",function(v) Aimbot.SafeAim = v end)
+SectionAimbot:NewToggle("No Recoil(Risky!)","",function(v)
+    NoRecoilEnabled = v
+    if v then ApplyNoRecoil() else RestoreRecoil() end
+end)
+
+-- Precaution UI (seek bars + toggle)
+SectionAimbot:NewToggle("Precaution Recoil","Lucky:)",function(v)
+    Aimbot.PrecautionEnabled = v
+    if not v then currentPrecAngle = 0 end
+end)
+SectionAimbot:NewSlider("Precaution Max Angle","Max Angle",20,0,function(v)
+    Aimbot.PrecautionMaxAngle = math.clamp(v,0,45)
+end)
+SectionAimbot:NewSlider("Precaution Speed","Speed",100,1,function(v)
+    -- slider returns 1..100 (you can interpret directly as deg/sec)
+    Aimbot.PrecautionSpeed = math.clamp(v,1,360)
+end)
+SectionAimbot:NewSlider("Precaution Smoothness","Don't using!",100,1,function(v)
+    Aimbot.PrecautionSmoothness = math.clamp(v/100,0.01,1)
+end)
+
+-- === MỚI: Helper để lấy tất cả target (players + optional server bots) ===
+local function GetAllTargets()
+    local targets = {}
+
+    -- add player characters (original behavior preserved)
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= LocalPlayer and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") then
+            table.insert(targets, {type = "player", ref = pl})
+        end
+    end
+
+    -- add server bots / NPCs nếu IgnoreServerBots == false
+    if not IgnoreServerBots then
+        -- duyệt workspace để tìm Model có Humanoid & HumanoidRootPart mà KHÔNG phải player character
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
+                local owner = Players:GetPlayerFromCharacter(obj)
+                if not owner then
+                    -- tránh thêm duplicate nếu một character object trùng tên với player.Character (just in case)
+                    table.insert(targets, {type = "npc", ref = obj})
+                end
+            end
+        end
+    end
+
+    return targets
+end
+
+-- GetClosest (hỗ trợ TorsoUP trả về Vector3) — giữ logic gốc nhưng dùng GetAllTargets() mới
+local function GetClosest()
+    local shortest, closest = Aimbot.FOV, nil
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+    -- duyệt qua tất cả target (players + npc nếu có)
+    for _, entry in ipairs(GetAllTargets()) do
+        local p = nil
+        local char = nil
+
+        if entry.type == "player" then
+            p = entry.ref
+            char = p.Character
+        else
+            -- npc
+            char = entry.ref
+            p = nil
+        end
+
+        if char then
+            local lockChoice = CurrentSessionPart or Aimbot.LockPart
+            local targetInstance = nil
+            local targetPos = nil
+
+            if lockChoice == "TorsoUP" then
+                local head = char:FindFirstChild("Head")
+                local upper = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+                if head and upper then
+                    targetPos = (head.Position + upper.Position) / 2 -- vị trí cổ
+                end
+            else
+                targetInstance = char:FindFirstChild(lockChoice)
+                if not targetInstance then
+                    targetInstance = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Head")
+                end
+                if targetInstance then
+                    targetPos = targetInstance.Position
+                end
+            end
+
+            -- check enemy only for player entries; for NPC (server bots) không có team => vẫn được xử lý
+            local is_valid_target = false
+            if p then
+                is_valid_target = isEnemy(p)
+            else
+                -- npc: nếu bạn bật TeamCheck thì khó xác định team; giữ mặc định là true (được aim) — nếu muốn ignore theo team, cần logic game-specific
+                is_valid_target = true
+            end
+
+            if targetPos and is_valid_target then
+                local pos, onScreen = Camera:WorldToViewportPoint(targetPos)
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if dist < shortest and wallCheck(Camera.CFrame.Position, targetPos, char) then
+                        shortest = dist
+                        if targetInstance then
+                            closest = targetInstance
+                        else
+                            closest = targetPos -- Vector3 for TorsoUP
+                        end
                     end
                 end
             end
         end
     end
 
-    if options.Recursive then
-        parent.DescendantAdded:Connect(NewListener)
-        for i,v in pairs(parent:GetDescendants()) do
-            NewListener(v)
-        end
-    else
-        parent.ChildAdded:Connect(NewListener)
-        for i,v in pairs(parent:GetChildren()) do
-            NewListener(v)
-        end
-    end
+    return closest
 end
 
-local boxBase = {}
-boxBase.__index = boxBase
-
-function boxBase:Remove()
-    ESP.Objects[self.Object] = nil
-    for i,v in pairs(self.Components) do
-        v.Visible = false
-        v:Remove()
-        self.Components[i] = nil
-    end
-end
-
-function boxBase:Update()
-    if not self.PrimaryPart then
-        --warn("not supposed to print", self.Object)
-        return self:Remove()
-    end
-
-    local color
-    if ESP.Highlighted == self.Object then
-       color = ESP.HighlightColor
-    else
-        color = self.Color or self.ColorDynamic and self:ColorDynamic() or ESP:GetColor(self.Object) or ESP.Color
-    end
-
-    local allow = true
-    if ESP.Overrides.UpdateAllow and not ESP.Overrides.UpdateAllow(self) then
-        allow = false
-    end
-    if self.Player and not ESP.TeamMates and ESP:IsTeamMate(self.Player) then
-        allow = false
-    end
-    if self.Player and not ESP.Players then
-        allow = false
-    end
-    if self.IsEnabled and (type(self.IsEnabled) == "string" and not ESP[self.IsEnabled] or type(self.IsEnabled) == "function" and not self:IsEnabled()) then
-        allow = false
-    end
-    if not workspace:IsAncestorOf(self.PrimaryPart) and not self.RenderInNil then
-        allow = false
-    end
-
-    if not allow then
-        for i,v in pairs(self.Components) do
-            v.Visible = false
-        end
+-- Render loop (sử dụng dt để tính tốc độ precaution)
+RunService.RenderStepped:Connect(function(dt)
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        FOVCircle.Visible = false
+        AimLine.Visible = false
+        aimingSession = false
+        CurrentSessionPart = nil
+        Aimbot.Locked = nil
+        currentPrecAngle = 0
         return
     end
 
-    if ESP.Highlighted == self.Object then
-        color = ESP.HighlightColor
+    local screenCenter = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    FOVCircle.Position = screenCenter
+    FOVCircle.Visible = Aimbot.Enabled and Aimbot.ShowFOV
+    FOVCircle.Radius = Aimbot.FOV
+
+    local activeHold = false
+    if Aimbot.AimCondition == "Fire" then
+        activeHold = holdingLeft
+    elseif Aimbot.AimCondition == "Aiming" then
+        activeHold = holdingRight
+    elseif Aimbot.AimCondition == "Both" then
+        activeHold = holdingLeft or holdingRight
+    elseif Aimbot.AimCondition == "Always" then
+        activeHold = true
     end
 
-    --calculations--
-    local cf = self.PrimaryPart.CFrame
-    if ESP.FaceCamera then
-        cf = CFrame.new(cf.p, cam.CFrame.p)
-    end
-    local size = self.Size
-    local locs = {
-        TopLeft = cf * ESP.BoxShift * CFrame.new(size.X/2,size.Y/2,0),
-        TopRight = cf * ESP.BoxShift * CFrame.new(-size.X/2,size.Y/2,0),
-        BottomLeft = cf * ESP.BoxShift * CFrame.new(size.X/2,-size.Y/2,0),
-        BottomRight = cf * ESP.BoxShift * CFrame.new(-size.X/2,-size.Y/2,0),
-        TagPos = cf * ESP.BoxShift * CFrame.new(0,size.Y/2,0),
-        Torso = cf * ESP.BoxShift
-    }
-
-    if ESP.Boxes then
-        local TopLeft, Vis1 = WorldToViewportPoint(cam, locs.TopLeft.p)
-        local TopRight, Vis2 = WorldToViewportPoint(cam, locs.TopRight.p)
-        local BottomLeft, Vis3 = WorldToViewportPoint(cam, locs.BottomLeft.p)
-        local BottomRight, Vis4 = WorldToViewportPoint(cam, locs.BottomRight.p)
-
-        if self.Components.Quad then
-            if Vis1 or Vis2 or Vis3 or Vis4 then
-                self.Components.Quad.Visible = true
-                self.Components.Quad.PointA = Vector2.new(TopRight.X, TopRight.Y)
-                self.Components.Quad.PointB = Vector2.new(TopLeft.X, TopLeft.Y)
-                self.Components.Quad.PointC = Vector2.new(BottomLeft.X, BottomLeft.Y)
-                self.Components.Quad.PointD = Vector2.new(BottomRight.X, BottomRight.Y)
-                self.Components.Quad.Color = color
+    if activeHold and Aimbot.Enabled and not aimingSession then
+        aimingSession = true
+        if Aimbot.SafeAim or Aimbot.RandomPart then
+            local roll = math.random(1,100)
+            if roll <= Aimbot.HeadshotChance then
+                CurrentSessionPart = "Head"
             else
-                self.Components.Quad.Visible = false
+                local parts = {"HumanoidRootPart","UpperTorso","Torso","LowerTorso","TorsoUP"}
+                CurrentSessionPart = parts[math.random(1, #parts)]
             end
-        end
-    else
-        self.Components.Quad.Visible = false
-    end
-
-    if ESP.Names then
-        local TagPos, Vis5 = WorldToViewportPoint(cam, locs.TagPos.p)
-        
-        if Vis5 then
-            self.Components.Name.Visible = true
-            self.Components.Name.Position = Vector2.new(TagPos.X, TagPos.Y)
-            self.Components.Name.Text = self.Name
-            self.Components.Name.Color = color
-            
-            self.Components.Distance.Visible = true
-            self.Components.Distance.Position = Vector2.new(TagPos.X, TagPos.Y + 14)
-            self.Components.Distance.Text = math.floor((cam.CFrame.p - cf.p).magnitude) .."m away"
-            self.Components.Distance.Color = color
         else
-            self.Components.Name.Visible = false
-            self.Components.Distance.Visible = false
+            CurrentSessionPart = nil
         end
-    else
-        self.Components.Name.Visible = false
-        self.Components.Distance.Visible = false
     end
-    
-    if ESP.Tracers then
-        local TorsoPos, Vis6 = WorldToViewportPoint(cam, locs.Torso.p)
+    if not activeHold and aimingSession then
+        aimingSession = false
+        CurrentSessionPart = nil
+        Aimbot.Locked = nil
+    end
 
-        if Vis6 then
-            self.Components.Tracer.Visible = true
-            self.Components.Tracer.From = Vector2.new(TorsoPos.X, TorsoPos.Y)
-            self.Components.Tracer.To = Vector2.new(cam.ViewportSize.X/2,cam.ViewportSize.Y/ESP.AttachShift)
-            self.Components.Tracer.Color = color
+    local closest = GetClosest()
+    if Aimbot.Enabled and closest then
+        Aimbot.Locked = closest
+    else
+        Aimbot.Locked = nil
+    end
+
+    -- AIM LINE update
+    if Aimbot.AimLine and closest then
+        local screenPos, onScreen
+        if typeof(closest) == "Instance" then
+            screenPos, onScreen = Camera:WorldToViewportPoint(closest.Position)
+        elseif typeof(closest) == "Vector3" then
+            screenPos, onScreen = Camera:WorldToViewportPoint(closest)
         else
-            self.Components.Tracer.Visible = false
+            onScreen = false
+        end
+
+        if onScreen then
+            AimLine.Visible = true
+            AimLine.From = Vector2.new(screenCenter.X, Camera.ViewportSize.Y - 10)
+            AimLine.To = Vector2.new(screenPos.X, screenPos.Y)
+            if holdingLeft then
+                AimLine.Color = Color3.fromRGB(0,255,0) -- shooting
+            elseif activeHold then
+                AimLine.Color = Color3.fromRGB(255,255,0) -- aiming
+            else
+                AimLine.Color = Color3.fromRGB(255,255,255) -- idle
+            end
+        else
+            AimLine.Visible = false
         end
     else
-        self.Components.Tracer.Visible = false
-    end
-end
-
-function ESP:Add(obj, options)
-    if not obj.Parent and not options.RenderInNil then
-        return warn(obj, "has no parent")
+        AimLine.Visible = false
     end
 
-    local box = setmetatable({
-        Name = options.Name or obj.Name,
-        Type = "Box",
-        Color = options.Color --[[or self:GetColor(obj)]],
-        Size = options.Size or self.BoxSize,
-        Object = obj,
-        Player = options.Player or plrs:GetPlayerFromCharacter(obj),
-        PrimaryPart = options.PrimaryPart or obj.ClassName == "Model" and (obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")) or obj:IsA("BasePart") and obj,
-        Components = {},
-        IsEnabled = options.IsEnabled,
-        Temporary = options.Temporary,
-        ColorDynamic = options.ColorDynamic,
-        RenderInNil = options.RenderInNil
-    }, boxBase)
-
-    if self:GetBox(obj) then
-        self:GetBox(obj):Remove()
-    end
-
-    box.Components["Quad"] = Draw("Quad", {
-        Thickness = self.Thickness,
-        Color = color,
-        Transparency = 1,
-        Filled = false,
-        Visible = self.Enabled and self.Boxes
-    })
-    box.Components["Name"] = Draw("Text", {
-		Text = box.Name,
-		Color = box.Color,
-		Center = true,
-		Outline = true,
-        Size = 19,
-        Visible = self.Enabled and self.Names
-	})
-	box.Components["Distance"] = Draw("Text", {
-		Color = box.Color,
-		Center = true,
-		Outline = true,
-        Size = 19,
-        Visible = self.Enabled and self.Names
-	})
-	
-	box.Components["Tracer"] = Draw("Line", {
-		Thickness = ESP.Thickness,
-		Color = box.Color,
-        Transparency = 1,
-        Visible = self.Enabled and self.Tracers
-    })
-    self.Objects[obj] = box
-    
-    obj.AncestryChanged:Connect(function(_, parent)
-        if parent == nil and ESP.AutoRemove ~= false then
-            box:Remove()
+    -- Update precaution angle (tăng khi bắn, giảm khi ngừng)
+    if Aimbot.PrecautionEnabled then
+        if holdingLeft then
+            currentPrecAngle = math.clamp(currentPrecAngle + (Aimbot.PrecautionSpeed * dt), 0, Aimbot.PrecautionMaxAngle)
+        else
+            currentPrecAngle = math.clamp(currentPrecAngle - (Aimbot.PrecautionSpeed * dt), 0, Aimbot.PrecautionMaxAngle)
         end
-    end)
-    obj:GetPropertyChangedSignal("Parent"):Connect(function()
-        if obj.Parent == nil and ESP.AutoRemove ~= false then
-            box:Remove()
-        end
-    end)
-
-    local hum = obj:FindFirstChildOfClass("Humanoid")
-	if hum then
-        hum.Died:Connect(function()
-            if ESP.AutoRemove ~= false then
-                box:Remove()
-            end
-		end)
-    end
-
-    return box
-end
-
-local function CharAdded(char)
-    local p = plrs:GetPlayerFromCharacter(char)
-    if not char:FindFirstChild("HumanoidRootPart") then
-        local ev
-        ev = char.ChildAdded:Connect(function(c)
-            if c.Name == "HumanoidRootPart" then
-                ev:Disconnect()
-                ESP:Add(char, {
-                    Name = p.Name,
-                    Player = p,
-                    PrimaryPart = c
-                })
-            end
-        end)
     else
-        ESP:Add(char, {
-            Name = p.Name,
-            Player = p,
-            PrimaryPart = char.HumanoidRootPart
-        })
+        currentPrecAngle = 0
     end
-end
-local function PlayerAdded(p)
-    p.CharacterAdded:Connect(CharAdded)
-    if p.Character then
-        coroutine.wrap(CharAdded)(p.Character)
-    end
-end
-plrs.PlayerAdded:Connect(PlayerAdded)
-for i,v in pairs(plrs:GetPlayers()) do
-    if v ~= plr then
-        PlayerAdded(v)
-    end
-end
 
-game:GetService("RunService").RenderStepped:Connect(function()
-    cam = workspace.CurrentCamera
-    for i,v in (ESP.Enabled and pairs or ipairs)(ESP.Objects) do
-        if v.Update then
-            local s,e = pcall(v.Update, v)
-            if not s then warn("[EU]", e, v.Object:GetFullName()) end
+    -- Aim smoothing / apply
+    if Aimbot.Enabled and activeHold and Aimbot.Locked then
+        local lockedPos = nil
+        if typeof(Aimbot.Locked) == "Instance" then
+            if not Aimbot.Locked:IsDescendantOf(workspace) then
+                Aimbot.Locked = nil
+                return
+            end
+            lockedPos = Aimbot.Locked.Position
+        elseif typeof(Aimbot.Locked) == "Vector3" then
+            lockedPos = Aimbot.Locked
+        end
+
+        if lockedPos then
+            -- cơ bản: goal nhìn thẳng tới vị trí locked
+            local goal = CFrame.new(Camera.CFrame.Position, lockedPos)
+
+            -- áp dụng precaution rotation (xoay nhẹ xuống theo currentPrecAngle)
+            if currentPrecAngle > 0 then
+                -- nhân với hệ số smoothness để tinh chỉnh "mượt" của rotation
+                local appliedAngle = currentPrecAngle * Aimbot.PrecautionSmoothness
+                goal = goal * CFrame.Angles(math.rad(-appliedAngle), 0, 0) -- negative để nhìn xuống
+            end
+
+            -- sensitivity smoothing (giữ nguyên cách cũ)
+            local s = math.clamp(Aimbot.Sensitivity, 0.001, 5)
+            Camera.CFrame = Camera.CFrame:Lerp(goal, s)
         end
     end
 end)
 
-return ESP
+
+
+
+
+
+
+
+
+
+--==================== TAB ESP (OPTIMIZED FOR KAVO UI, FIXED LINE WALL CHECK + FIXED SCREEN ALERT DIRECTION + ESP BOT) ====================--
+local TabESP = Window:NewTab("ESP")
+local SectionESP = TabESP:NewSection("ESP Settings")
+
+local Camera = workspace.CurrentCamera
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+local ESP = {
+    Enabled = false,
+    Boxes = false,
+    BoxType = "Full Box",
+    BoxColor = Color3.fromRGB(255,255,255),
+    Tracers = false,
+    TracerOrigin = "Bottom",
+    TracerColor = Color3.fromRGB(255,255,255),
+    Names = false,
+    HealthBar = false,
+    Distance = false,
+    Skeleton = false,
+    HeadDot = false,
+    WeaponInfo = false,
+    Count = false,
+    TeamCheck = true,
+    Range = 2000,
+    Alert = false,
+    LineWallCheck = true,
+    ScreenAlert = false, -- NEW FEATURE
+    Bots = false -- NEW: Enable ESP for NPCs/Bots
+}
+
+local ESPCache = {}
+
+-- UI
+SectionESP:NewToggle("Enable ESP","",function(v) ESP.Enabled=v end)
+SectionESP:NewToggle("Boxes","",function(v) ESP.Boxes=v end)
+SectionESP:NewDropdown("Box Type","",{"Full Box","Corner Box"},function(v) ESP.BoxType=v end)
+SectionESP:NewColorPicker("Box Color","",Color3.fromRGB(255,255,255),function(v) ESP.BoxColor=v end)
+SectionESP:NewToggle("Tracers","",function(v) ESP.Tracers=v end)
+SectionESP:NewDropdown("Tracer Origin","",{"Bottom","Middle","Top"},function(v) ESP.TracerOrigin=v end)
+SectionESP:NewColorPicker("Tracer Color","",Color3.fromRGB(255,255,255),function(v) ESP.TracerColor=v end)
+SectionESP:NewToggle("Names","",function(v) ESP.Names=v end)
+SectionESP:NewToggle("Health Bar","",function(v) ESP.HealthBar=v end)
+SectionESP:NewToggle("Distance","",function(v) ESP.Distance=v end)
+SectionESP:NewToggle("Skeleton","",function(v) ESP.Skeleton=v end)
+SectionESP:NewToggle("Head Dot","",function(v) ESP.HeadDot=v end)
+SectionESP:NewToggle("Weapon Info","",function(v) ESP.WeaponInfo=v end)
+SectionESP:NewToggle("ESP Count","",function(v) ESP.Count=v end)
+SectionESP:NewToggle("Team Check","",function(v) ESP.TeamCheck=v end)
+SectionESP:NewSlider("ESP Range","",2000,100,function(v) ESP.Range=v end)
+SectionESP:NewToggle("ESP Alert","",function(v) ESP.Alert=v end)
+SectionESP:NewToggle("Line Wall Check","Đổi màu line khi bị tường chắn",function(v) ESP.LineWallCheck=v end)
+SectionESP:NewToggle("Screen Alert","Hiển thị hướng địch khuất sau camera",function(v) ESP.ScreenAlert=v end) -- NEW UI toggle
+SectionESP:NewToggle("ESP Bot","Hiển thị ESP cho cả Bot/NPC",function(v) ESP.Bots=v end) -- 🆕 NEW TOGGLE
+
+-- Text objects
+local CountText = Drawing.new("Text")
+CountText.Size = 18
+CountText.Center = true
+CountText.Outline = true
+CountText.Color = Color3.fromRGB(255,255,255)
+CountText.Visible = false
+
+local AlertText = Drawing.new("Text")
+AlertText.Size = 26
+AlertText.Center = true
+AlertText.Outline = true
+AlertText.Color = Color3.fromRGB(255,0,0)
+AlertText.Text = "⚠ ENEMY AIMING AT YOU!"
+AlertText.Visible = false
+
+-- Bone pairs
+local bones = {
+    {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+    {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+    {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+    {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"}
+}
+
+local function makeESP(plr)
+    if ESPCache[plr] then return ESPCache[plr] end
+    local d = {}
+    d.Box = Drawing.new("Square")
+    d.Box.Thickness = 2
+    d.Box.Filled = false
+
+    d.Corner = {}
+    for i=1,8 do
+        local l = Drawing.new("Line")
+        l.Thickness = 2
+        table.insert(d.Corner,l)
+    end
+
+    d.Tracer = Drawing.new("Line")
+    d.Tracer.Thickness = 1.5
+
+    d.Name = Drawing.new("Text")
+    d.Name.Size = 14
+    d.Name.Center = true
+    d.Name.Outline = true
+    d.Name.Color = Color3.fromRGB(255,255,255)
+
+    d.Distance = Drawing.new("Text")
+    d.Distance.Size = 14
+    d.Distance.Center = true
+    d.Distance.Outline = true
+    d.Distance.Color = Color3.fromRGB(255,255,0)
+
+    d.HealthBack = Drawing.new("Line")
+    d.HealthBack.Thickness = 6
+    d.HealthFront = Drawing.new("Line")
+    d.HealthFront.Thickness = 6
+
+    d.Head = Drawing.new("Circle")
+    d.Head.Radius = 4
+    d.Head.Filled = true
+
+    d.Weapon = Drawing.new("Text")
+    d.Weapon.Size = 14
+    d.Weapon.Center = true
+    d.Weapon.Outline = true
+    d.Weapon.Color = Color3.fromRGB(0,128,255)
+
+    d.Skeleton = {}
+    for i=1,#bones do
+        local l = Drawing.new("Line")
+        l.Thickness = 1.5
+        table.insert(d.Skeleton,l)
+    end
+
+    -- Screen Alert triangle
+    d.AlertTri = Drawing.new("Triangle")
+    d.AlertTri.Filled = true
+    d.AlertTri.Visible = false
+
+    ESPCache[plr] = d
+    return d
+end
+
+local function clearESP(plr)
+    if not ESPCache[plr] then return end
+    for _,obj in pairs(ESPCache[plr]) do
+        if type(obj)=="table" then
+            for _,x in pairs(obj) do x.Visible=false end
+        else obj.Visible=false end
+    end
+end
+
+local function checkWall(targetPos, targetChar)
+    local myChar = LocalPlayer.Character
+    if not (myChar and targetChar) then return false end
+
+    local root = myChar:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+
+    local direction = (targetPos - root.Position)
+    local distance = direction.Magnitude
+    if distance < 5 then return false end
+
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {myChar, targetChar}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.IgnoreWater = true
+
+    local rayResult = workspace:Raycast(root.Position, direction.Unit * distance, params)
+    if rayResult and rayResult.Instance then
+        local obj = rayResult.Instance
+        if obj.CanCollide and obj.Transparency < 0.2 then
+            return true
+        end
+    end
+    return false
+end
+
+local function worldToScreen(v3)
+    local p,on = Camera:WorldToViewportPoint(v3)
+    if not on or p.Z <= 0 then return Vector2.new(), false end
+    return Vector2.new(p.X,p.Y), true
+end
+
+local function EnemyIsAimingAtMe(enemy)
+    local head = enemy.Character and enemy.Character:FindFirstChild("Head")
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not (head and root) then return false end
+    return head.CFrame.LookVector:Dot((root.Position - head.Position).Unit) > 0.96
+end
+
+local function drawCornerBox(lines, TL, TR, BL, BR, size, color)
+    local p = {
+        {TL,TL+Vector2.new(size,0)},
+        {TL,TL+Vector2.new(0,size)},
+        {TR,TR+Vector2.new(-size,0)},
+        {TR,TR+Vector2.new(0,size)},
+        {BL,BL+Vector2.new(size,0)},
+        {BL,BL+Vector2.new(0,-size)},
+        {BR,BR+Vector2.new(-size,0)},
+        {BR,BR+Vector2.new(0,-size)}
+    }
+    for i,v in ipairs(p) do
+        lines[i].From = v[1]
+        lines[i].To = v[2]
+        lines[i].Color = color
+        lines[i].Visible = true
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not ESP.Enabled then
+        for p in pairs(ESPCache) do clearESP(p) end
+        CountText.Visible=false
+        AlertText.Visible=false
+        return
+    end
+
+    local tracerFrom = (ESP.TracerOrigin=="Bottom") and Vector2.new(Camera.ViewportSize.X/2,Camera.ViewportSize.Y)
+        or (ESP.TracerOrigin=="Middle") and Vector2.new(Camera.ViewportSize.X/2,Camera.ViewportSize.Y/2)
+        or Vector2.new(Camera.ViewportSize.X/2,0)
+
+    local enemies, showAlert = 0, false
+
+    -- Build target list: players first (excluding local), then optionally bots (models)
+    local targetList = {}
+    for _,p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then table.insert(targetList, p) end
+    end
+    if ESP.Bots then
+        for _,obj in pairs(workspace:GetChildren()) do
+            if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
+                if not Players:GetPlayerFromCharacter(obj) then
+                    table.insert(targetList, obj) -- insert model (bot)
+                end
+            end
+        end
+    end
+
+    -- Iterate both Players and bot Models
+    for _,entry in pairs(targetList) do
+        -- determine whether entry is Player or Model (bot)
+        local isPlayer = typeof(entry) == "Instance" and entry:IsA("Player") -- Player object check
+        -- If it's a Player object, keep same logic as original (plr)
+        local plr = nil
+        local char = nil
+        local hum = nil
+        local root = nil
+        local head = nil
+        local dist = nil
+
+        if isPlayer then
+            plr = entry
+            char = plr.Character
+            hum = char and char:FindFirstChildOfClass("Humanoid")
+            root = char and char:FindFirstChild("HumanoidRootPart")
+            head = char and char:FindFirstChild("Head")
+        else
+            -- entry is Model (bot)
+            local obj = entry
+            char = obj
+            hum = char and char:FindFirstChildOfClass("Humanoid")
+            root = char and char:FindFirstChild("HumanoidRootPart")
+            head = char and char:FindFirstChild("Head")
+        end
+
+        -- keep original checks but using char/hum/root from either player or bot
+        if not (char and hum and root and hum.Health>0) then
+            clearESP(entry)
+            continue
+        end
+
+        -- Team check: only applicable for Player entries (bots considered enemies)
+        if ESP.TeamCheck and isPlayer and plr.Team==LocalPlayer.Team then
+            clearESP(entry)
+            continue
+        end
+
+        local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not myRoot then continue end
+        dist = (root.Position - myRoot.Position).Magnitude
+        if dist>ESP.Range then clearESP(entry) continue end
+
+        local d = makeESP(entry)
+        enemies += 1
+
+        local top,ok1 = worldToScreen(head and (head.Position+Vector3.new(0,0.2,0)) or (root.Position+Vector3.new(0,1.5,0)))
+        local bottom,ok2 = worldToScreen(root.Position-Vector3.new(0,1.5,0))
+        local onScreen = ok1 and ok2
+
+        if not onScreen and ESP.ScreenAlert then
+            local dir = (root.Position - Camera.CFrame.Position)
+            if dir.Magnitude > 0 then
+                local unitDir = dir.Unit
+                local rel = Vector3.new(
+                    unitDir:Dot(Camera.CFrame.RightVector),
+                    unitDir:Dot(Camera.CFrame.UpVector),
+                    unitDir:Dot(Camera.CFrame.LookVector)
+                )
+                local angle = math.atan2(rel.X, rel.Z)
+                local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                local radius = math.min(center.X, center.Y) - 40
+                local ux = math.sin(angle)
+                local uy = -math.cos(angle)
+                local tip = center + Vector2.new(ux * radius, uy * radius)
+                local perp = Vector2.new(-uy, ux)
+                local size = 14
+                local baseDist = size * 1.2
+                local baseCenter = tip - Vector2.new(ux * baseDist, uy * baseDist)
+                local halfWidth = size * 0.7
+                local p1 = tip
+                local p2 = baseCenter + perp * halfWidth
+                local p3 = baseCenter - perp * halfWidth
+                d.AlertTri.PointA = p1
+                d.AlertTri.PointB = p2
+                d.AlertTri.PointC = p3
+                local triColor = (isPlayer and (plr.TeamColor and plr.TeamColor.Color) ) or Color3.fromRGB(255,0,0)
+                d.AlertTri.Color = triColor
+                d.AlertTri.Visible = true
+            else
+                d.AlertTri.Visible = false
+            end
+        else
+            d.AlertTri.Visible = false
+        end
+
+        -- On-screen behavior (boxes, tracer, name, etc.)
+        if onScreen then
+            local height = math.clamp(bottom.Y - top.Y,36,160)
+            local width = height/2.2
+            local x,y = top.X - width/2, top.Y
+            local TL,TR,BL,BR = Vector2.new(x,y),Vector2.new(x+width,y),Vector2.new(x,y+height),Vector2.new(x+width,y+height)
+
+            d.Box.Color=ESP.BoxColor
+            for _,l in pairs(d.Corner) do l.Color=ESP.BoxColor end
+
+            local isBlocked = false
+            if ESP.LineWallCheck and ESP.Tracers then
+                isBlocked = checkWall(root.Position, char)
+            end
+            local tracerColor = isBlocked and Color3.fromRGB(255,0,0) or Color3.fromRGB(0,255,0)
+
+            -- Box
+            if ESP.Boxes then
+                if ESP.BoxType=="Full Box" then
+                    d.Box.Position=Vector2.new(x,y)
+                    d.Box.Size=Vector2.new(width,height)
+                    d.Box.Visible=true
+                    for _,l in pairs(d.Corner) do l.Visible=false end
+                else
+                    d.Box.Visible=false
+                    drawCornerBox(d.Corner,TL,TR,BL,BR,math.clamp(width/4,6,30),ESP.BoxColor)
+                end
+            else
+                d.Box.Visible=false
+                for _,l in pairs(d.Corner) do l.Visible=false end
+            end
+
+            -- Tracer
+            if ESP.Tracers then
+                d.Tracer.From=tracerFrom
+                d.Tracer.To=Vector2.new(top.X,top.Y+height/2)
+                d.Tracer.Color=tracerColor
+                d.Tracer.Visible=true
+            else d.Tracer.Visible=false end
+
+            -- Name
+            if ESP.Names then
+                if isPlayer then
+                    d.Name.Text=plr.Name
+                else
+                    d.Name.Text = char.Name or "Bot"
+                end
+                d.Name.Position=Vector2.new(top.X, y-14)
+                d.Name.Visible=true
+            else d.Name.Visible=false end
+
+            -- Distance
+            if ESP.Distance then
+                d.Distance.Text=string.format("%.0fm",dist)
+                d.Distance.Position=Vector2.new(top.X,y+height+10)
+                d.Distance.Visible=true
+            else d.Distance.Visible=false end
+
+            -- Health
+            if ESP.HealthBar then
+                local ratio=math.clamp(hum.Health/hum.MaxHealth,0,1)
+                local lx=x-6
+                d.HealthBack.From=Vector2.new(lx,y)
+                d.HealthBack.To=Vector2.new(lx,y+height)
+                d.HealthBack.Color=Color3.fromRGB(40,40,40)
+                d.HealthBack.Visible=true
+                d.HealthFront.From=Vector2.new(lx,y+height*(1-ratio))
+                d.HealthFront.To=Vector2.new(lx,y+height)
+                d.HealthFront.Color=ratio>0.6 and Color3.new(0,1,0) or ratio>0.3 and Color3.new(1,1,0) or Color3.new(1,0,0)
+                d.HealthFront.Visible=true
+            else d.HealthBack.Visible=false d.HealthFront.Visible=false end
+
+            -- Head
+            if ESP.HeadDot and head then
+                local hp,on = worldToScreen(head.Position)
+                if on then d.Head.Position=hp d.Head.Visible=true else d.Head.Visible=false end
+            else d.Head.Visible=false end
+
+            -- Weapon
+            if ESP.WeaponInfo then
+                local tool = char:FindFirstChildOfClass("Tool")
+                d.Weapon.Text = tool and tool.Name or "None"
+                d.Weapon.Position = Vector2.new(top.X, y+height+24)
+                d.Weapon.Visible = true
+            else d.Weapon.Visible = false end
+
+            -- Skeleton
+            if ESP.Skeleton then
+                for i,pair in ipairs(bones) do
+                    local p1 = char:FindFirstChild(pair[1])
+                    local p2 = char:FindFirstChild(pair[2])
+                    if p1 and p2 then
+                        local v1,on1 = worldToScreen(p1.Position)
+                        local v2,on2 = worldToScreen(p2.Position)
+                        if on1 and on2 then
+                            d.Skeleton[i].From=v1
+                            d.Skeleton[i].To=v2
+                            d.Skeleton[i].Color=Color3.fromRGB(0,255,0)
+                            d.Skeleton[i].Visible=true
+                        else d.Skeleton[i].Visible=false end
+                    else d.Skeleton[i].Visible=false end
+                end
+            else for _,l in ipairs(d.Skeleton) do l.Visible=false end end
+
+            if ESP.Alert then
+                -- Enemy aiming check:
+                local aiming = false
+                if isPlayer then
+                    if EnemyIsAimingAtMe(plr) then aiming = true end
+                else
+                    -- for bot model, compute similarly (head.LookVector vs our root)
+                    local botHead = head
+                    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if botHead and myRoot then
+                        if botHead.CFrame.LookVector:Dot((myRoot.Position - botHead.Position).Unit) > 0.96 then
+                            aiming = true
+                        end
+                    end
+                end
+                if aiming then showAlert=true end
+            end
+        else
+            -- When off-screen, hide on-screen-only drawings to avoid stray artefacts
+            d.Box.Visible=false
+            for _,l in pairs(d.Corner) do l.Visible=false end
+            d.Tracer.Visible=false
+            d.Name.Visible=false
+            d.Distance.Visible=false
+            d.HealthBack.Visible=false
+            d.HealthFront.Visible=false
+            d.Head.Visible=false
+            d.Weapon.Visible=false
+            for _,l in ipairs(d.Skeleton) do l.Visible=false end
+            -- Offscreen alert check
+            if ESP.Alert then
+                local aiming = false
+                if isPlayer then
+                    if EnemyIsAimingAtMe(plr) then aiming = true end
+                else
+                    local botHead = head
+                    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if botHead and myRoot then
+                        if botHead.CFrame.LookVector:Dot((myRoot.Position - botHead.Position).Unit) > 0.96 then
+                            aiming = true
+                        end
+                    end
+                end
+                if aiming then showAlert=true end
+            end
+        end
+    end
+
+    CountText.Visible=ESP.Count
+    if ESP.Count then
+        CountText.Text="Enemies: "..enemies
+        CountText.Position=Vector2.new(Camera.ViewportSize.X/2,50)
+    end
+
+    AlertText.Visible=showAlert
+    if showAlert then
+        AlertText.Position=Vector2.new(Camera.ViewportSize.X/2,120)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(pl)
+    clearESP(pl)
+    ESPCache[pl]=nil
+end)
+Players.PlayerAdded:Connect(function(pl)
+    pl.CharacterAdded:Connect(function() clearESP(pl) end)
+end)
+
+
+
+
+
+
+
+
+
+
+-- ================== TAB TRIGGER BOT ==================
+local TabTrigger = Window:NewTab("Trigger Bot")
+local SectionTrigger = TabTrigger:NewSection("Trigger Settings")
+
+local TriggerBot = {
+    Enabled = false,
+    Delay = 5, -- ms
+    TeamCheck = true
+}
+
+SectionTrigger:NewToggle("Enable Trigger Bot","Trigger Bot is OP!",function(v) 
+    TriggerBot.Enabled = v 
+    Notify("TriggerBot", v and "Enabled" or "Disabled", 2)
+end)
+
+SectionTrigger:NewToggle("Team Check","",function(v) TriggerBot.TeamCheck = v end)
+SectionTrigger:NewSlider("Delay (ms)","",500,1,function(v) TriggerBot.Delay = v end)
+
+-- Hàm kiểm tra có phải enemy không
+local function isEnemyTrigger(player)
+    if not player or not player.Character then return false end
+    if TriggerBot.TeamCheck and LocalPlayer.Team and player.Team then
+        return player.Team ~= LocalPlayer.Team
+    end
+    return true
+end
+
+-- TriggerBot Loop
+local lastShot = 0
+RunService.RenderStepped:Connect(function()
+    if not TriggerBot.Enabled then return end
+    local mouse = LocalPlayer:GetMouse()
+    local target = mouse.Target and mouse.Target.Parent
+    if target and target:FindFirstChildOfClass("Humanoid") then
+        local player = Players:GetPlayerFromCharacter(target)
+        if player and isEnemyTrigger(player) then
+            if tick() - lastShot >= TriggerBot.Delay/1000 then
+                mouse1press()
+                wait()
+                mouse1release()
+                lastShot = tick()
+            end
+        end
+    end
+end)
